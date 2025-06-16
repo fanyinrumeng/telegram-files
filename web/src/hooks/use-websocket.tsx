@@ -164,7 +164,7 @@ export function useWebsocket() {
   const context = useContext(WebSocketContext);
   if (context === undefined) {
     throw new Error(
-      "useTelegramWebSocket must be used within a WebSocketProvider",
+      "useWebsocket must be used within a WebSocketProvider",
     );
   }
   return context;
