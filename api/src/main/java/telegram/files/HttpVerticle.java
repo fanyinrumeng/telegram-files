@@ -19,13 +19,13 @@ import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import io.vertx.ext.healthchecks.HealthCheckHandler;
 import io.vertx.ext.healthchecks.HealthChecks;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.BodyHandler;
 import io.vertx.ext.web.handler.CorsHandler;
 import io.vertx.ext.web.handler.SessionHandler;
+import io.vertx.ext.web.healthchecks.HealthCheckHandler;
 import io.vertx.ext.web.sstore.LocalSessionStore;
 import io.vertx.ext.web.sstore.SessionStore;
 import org.drinkless.tdlib.TdApi;
@@ -116,7 +116,7 @@ public class HttpVerticle extends AbstractVerticle {
         if (!Config.isProd()) {
             router.route()
                     .handler(CorsHandler.create()
-                            .addRelativeOrigin("http://localhost:3000")
+                            .addOrigin("http://localhost:3000")
                             .allowedMethod(HttpMethod.GET)
                             .allowedMethod(HttpMethod.POST)
                             .allowedMethod(HttpMethod.PUT)
@@ -170,6 +170,7 @@ public class HttpVerticle extends AbstractVerticle {
         router.post("/files/cancel-download-multiple").handler(this::handleFileCancelDownloadMultiple);
         router.post("/files/toggle-pause-download-multiple").handler(this::handleFileTogglePauseDownloadMultiple);
         router.post("/files/remove-multiple").handler(this::handleFileRemoveMultiple);
+        router.post("/files/update-tags").handler(this::handleFileTagsUpdateMultiple);
         router.post("/file/:uniqueId/update-tags").handler(this::handleFileTagsUpdate);
 
         router.route()
@@ -404,6 +405,14 @@ public class HttpVerticle extends AbstractVerticle {
             ctx.fail(400);
             return;
         }
+        String link = URLUtil.decode(ctx.queryParams().get("link"));
+        if (StrUtil.isNotBlank(link)) {
+            telegramVerticle.parseLink(link)
+                    .onSuccess(ctx::json)
+                    .onFailure(ctx::fail);
+            return;
+        }
+
         Map<String, String> filter = new HashMap<>();
         ctx.request().params().forEach(filter::put);
         filter.put("search", URLUtil.decode(filter.get("search")));
@@ -414,16 +423,20 @@ public class HttpVerticle extends AbstractVerticle {
     }
 
     private void handleTelegramFilesCount(RoutingContext ctx) {
+        boolean offline = Convert.toBool(ctx.queryParams().get("offline"), false);
+        Long telegramId = Convert.toLong(ctx.pathParam("telegramId"), -1L);
+        Long chatId = Convert.toLong(ctx.pathParam("chatId"), -1L);
+        if (offline) {
+            DataVerticle.fileRepository.countWithType(telegramId, chatId)
+                    .onSuccess(ctx::json)
+                    .onFailure(ctx::fail);
+            return;
+        }
+
         TelegramVerticle telegramVerticle = getTelegramVerticleByPath(ctx);
         if (telegramVerticle == null) {
             return;
         }
-        String chatIdStr = ctx.pathParam("chatId");
-        if (StrUtil.isBlank(chatIdStr)) {
-            ctx.fail(400);
-            return;
-        }
-        long chatId = Convert.toLong(chatIdStr);
         telegramVerticle.getChatFilesCount(chatId)
                 .onSuccess(ctx::json)
                 .onFailure(ctx::fail);
@@ -670,6 +683,22 @@ public class HttpVerticle extends AbstractVerticle {
         });
     }
 
+    private void handleFileTagsUpdateMultiple(RoutingContext ctx) {
+        JsonObject jsonObject = ctx.body().asJsonObject();
+        String tags = jsonObject.getString("tags");
+        if (StrUtil.isBlank(tags)) {
+            ctx.fail(400);
+            return;
+        }
+        handleFileMultiple(ctx, (telegramVerticle, file) -> {
+            String uniqueId = file.getString("uniqueId");
+            if (StrUtil.isBlank(uniqueId)) {
+                return Future.failedFuture("Invalid parameters");
+            }
+            return DataVerticle.fileRepository.updateTags(uniqueId, tags);
+        });
+    }
+
     private void handleFileMultiple(RoutingContext ctx, Function2<TelegramVerticle, JsonObject, Future<?>> handler) {
         JsonObject jsonObject = ctx.body().asJsonObject();
         JsonArray files = jsonObject.getJsonArray("files");
@@ -694,9 +723,10 @@ public class HttpVerticle extends AbstractVerticle {
                         .toList()
                 )
                 .onSuccess(ctx::json).onFailure(r -> {
-                    log.error(r, "Failed to start download multiple files");
-                    ctx.json(JsonObject.of("error", "Part of the files failed to start download"));
-                    ctx.response().setStatusCode(400).end();
+                    log.error(r, "Failed to handle multiple files: %s".formatted(r.getMessage()));
+                    ctx.response()
+                            .setStatusCode(400)
+                            .end(JsonObject.of("error", "Part of the files failed to process: %s".formatted(r.getMessage())).encode());
                 });
     }
 

@@ -30,6 +30,7 @@ export function useFiles(
   accountId: string,
   chatId: string,
   messageThreadId?: number,
+  link?: string,
 ) {
   const noAccountSpecified = accountId === "-1" && chatId === "-1";
   const url = noAccountSpecified
@@ -67,6 +68,7 @@ export function useFiles(
         tags: filters.tags.join(","),
       }),
       ...(messageThreadId && { messageThreadId: messageThreadId.toString() }),
+      ...(link && { link: window.encodeURIComponent(link) }),
       ...(filters.dateType && { dateType: filters.dateType }),
       ...(filters.dateRange && { dateRange: filters.dateRange.join(",") }),
       ...(filters.sizeRange && { sizeRange: filters.sizeRange.join(",") }),
@@ -93,6 +95,8 @@ export function useFiles(
         params.set("fromSortField", lastFile!.completionDate.toString());
       } else if (filters.sort === "date") {
         params.set("fromSortField", lastFile!.date.toString());
+      } else if (filters.sort === "reaction_count") {
+        params.set("fromSortField", lastFile!.reactionCount.toString());
       }
     }
     return `${url}?${params.toString()}`;

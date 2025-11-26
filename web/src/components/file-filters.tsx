@@ -8,11 +8,12 @@ import {
   Filter,
   X,
 } from "lucide-react";
-import type {
-  DownloadStatus,
-  FileFilter,
-  FileType,
-  TransferStatus,
+import {
+  type DownloadStatus,
+  type FileFilter,
+  type FileType,
+  type SortFields,
+  type TransferStatus,
 } from "@/lib/types";
 import { Button } from "./ui/button";
 import {
@@ -218,17 +219,24 @@ interface SizeFilterProps {
   onChange: (range: [number, number], unit: "KB" | "MB" | "GB") => void;
 }
 
-const SizeFilter = ({ sizeRange, onChange }: SizeFilterProps) => {
+const SizeFilter = ({ sizeRange, sizeUnit, onChange }: SizeFilterProps) => {
   const defaultRange: [number, number] = [0, 1000];
   const [localRange, setLocalRange] = useState<[number, number]>(
     sizeRange ?? defaultRange,
   );
-  const [localUnit, setLocalUnit] = useState<"KB" | "MB" | "GB">("MB");
+  const [localUnit, setLocalUnit] = useState<"KB" | "MB" | "GB">(
+    sizeUnit ?? "MB",
+  );
 
   const handleChange = (newValue: number[]) => {
     const range: [number, number] = [newValue[0]!, newValue[1]!];
     setLocalRange(range);
     onChange(range, localUnit);
+  };
+
+  const handleUnitChange = (unit: "KB" | "MB" | "GB") => {
+    setLocalUnit(unit);
+    onChange(localRange, unit);
   };
 
   return (
@@ -246,21 +254,21 @@ const SizeFilter = ({ sizeRange, onChange }: SizeFilterProps) => {
               <Button
                 size="sm"
                 variant={localUnit === "KB" ? "default" : "outline"}
-                onClick={() => setLocalUnit("KB")}
+                onClick={() => handleUnitChange("KB")}
               >
                 KB
               </Button>
               <Button
                 size="sm"
                 variant={localUnit === "MB" ? "default" : "outline"}
-                onClick={() => setLocalUnit("MB")}
+                onClick={() => handleUnitChange("MB")}
               >
                 MB
               </Button>
               <Button
                 size="sm"
                 variant={localUnit === "GB" ? "default" : "outline"}
-                onClick={() => setLocalUnit("GB")}
+                onClick={() => handleUnitChange("GB")}
               >
                 GB
               </Button>
@@ -297,12 +305,9 @@ const SizeFilter = ({ sizeRange, onChange }: SizeFilterProps) => {
 };
 
 interface SortFilterProps {
-  sort: "date" | "completion_date" | "size" | undefined;
+  sort: SortFields | undefined;
   order: "asc" | "desc" | undefined;
-  onChange: (
-    sort: "date" | "completion_date" | "size",
-    order: "asc" | "desc",
-  ) => void;
+  onChange: (sort: SortFields, order: "asc" | "desc") => void;
 }
 
 const SortFilter = ({ sort, order, onChange }: SortFilterProps) => {
@@ -313,6 +318,7 @@ const SortFilter = ({ sort, order, onChange }: SortFilterProps) => {
     { value: "date", label: "Sent Date" },
     { value: "completion_date", label: "Downloaded Date" },
     { value: "size", label: "File Size" },
+    { value: "reaction_count", label: "Reaction Count" },
   ] as const;
 
   return (
@@ -425,10 +431,7 @@ export default function FileFilters({
     setLocalFilters((prev) => ({ ...prev, sizeRange, sizeUnit }));
   };
 
-  const handleSortChange = (
-    sort: "date" | "completion_date" | "size",
-    order: "asc" | "desc",
-  ) => {
+  const handleSortChange = (sort: SortFields, order: "asc" | "desc") => {
     setLocalFilters((prev) => ({ ...prev, sort, order }));
   };
 
@@ -456,7 +459,7 @@ export default function FileFilters({
           <Filter className="h-5 w-5" />
           {!isMobile && "Filters"}
           {filterCount > 0 && (
-            <span className="absolute left-0 top-0 -ml-1 -mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-xs text-white">
+            <span className="absolute left-0 top-0 -ml-1 -mt-1 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-xs text-white">
               {filterCount}
             </span>
           )}

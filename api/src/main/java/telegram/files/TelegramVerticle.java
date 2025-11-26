@@ -14,7 +14,7 @@ import cn.hutool.log.LogFactory;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
-import io.vertx.core.impl.NoStackTraceException;
+import io.vertx.core.VertxException;
 import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
@@ -251,6 +251,23 @@ public class TelegramVerticle extends AbstractVerticle {
         });
     }
 
+    public Future<JsonObject> parseLink(String link) {
+        return client.execute(new TdApi.GetMessageLinkInfo(link))
+                .compose(messageLinkInfo -> {
+                    if (messageLinkInfo.message == null) {
+                        return Future.failedFuture("Message not found for link: " + link);
+                    }
+                    return FileRecordRetriever.getAlbumMessages(this.telegramRecord.id(), messageLinkInfo.message);
+                })
+                .compose(messages -> TelegramConverter.convertFiles(this.telegramRecord.id(), messages)
+                        .map(files -> new JsonObject()
+                                .put("files", files)
+                                .put("count", files.size())
+                                .put("size", files.size())
+                                .put("nextFromMessageId", 0L) // No next message ID for link parsing
+                        ));
+    }
+
     public Future<Tuple2<String, String>> loadPreview(String uniqueId) {
         return DataVerticle.fileRepository
                 .getByUniqueId(uniqueId)
@@ -285,7 +302,7 @@ public class TelegramVerticle extends AbstractVerticle {
                     }
 
                     TdApiHelp.FileHandler<? extends TdApi.MessageContent> fileHandler = TdApiHelp.getFileHandler(message)
-                            .orElseThrow(() -> new NoStackTraceException("not support message type"));
+                            .orElseThrow(() -> VertxException.noStackTrace("not support message type"));
                     FileRecord fileRecord = fileHandler.convertFileRecord(telegramRecord.id()).withThreadInfo(messageThreadInfo);
                     return DataVerticle.fileRepository.createIfNotExist(fileRecord)
                             .compose(created -> {
@@ -394,7 +411,7 @@ public class TelegramVerticle extends AbstractVerticle {
         return client.execute(new TdApi.GetFile(fileId))
                 .otherwise((TdApi.File) null)
                 .compose(file -> DataVerticle.fileRepository
-                        .getByUniqueId(file.remote.uniqueId)
+                        .getByUniqueId(uniqueId)
                         .map(fileRecord -> Tuple.tuple(file, fileRecord))
                 )
                 .compose(tuple2 -> {
@@ -413,6 +430,11 @@ public class TelegramVerticle extends AbstractVerticle {
                     if (file != null && file.local != null && StrUtil.isNotBlank(file.local.path)) {
                         return client.execute(new TdApi.DeleteFile(fileId))
                                 .map(file);
+                    } else if (!fileRecord.isTransferStatus(FileRecord.TransferStatus.completed)
+                               && StrUtil.isNotBlank(fileRecord.localPath())) {
+                        if (FileUtil.del(fileRecord.localPath())) {
+                            log.debug("[%s] Remove file success: %s".formatted(this.getRootId(), fileRecord.localPath()));
+                        }
                     }
                     return Future.succeededFuture(file);
                 })
@@ -506,7 +528,7 @@ public class TelegramVerticle extends AbstractVerticle {
         return DataVerticle.settingRepository.<SettingProxyRecords>getByKey(SettingKey.proxys)
                 .map(settingProxyRecords -> Optional.ofNullable(settingProxyRecords)
                         .flatMap(r -> r.getProxy(proxyName))
-                        .orElseThrow(() -> new NoStackTraceException("Proxy %s not found".formatted(proxyName)))
+                        .orElseThrow(() -> VertxException.noStackTrace("Proxy %s not found".formatted(proxyName)))
                 )
                 .compose(proxy -> this.getTdProxy(proxy)
                         .map(r -> Tuple.tuple(proxy, r))
@@ -523,12 +545,13 @@ public class TelegramVerticle extends AbstractVerticle {
                     }
 
                     TdApi.ProxyType proxyType;
-                    if (Objects.equals(proxy.type, "http")) {
-                        proxyType = new TdApi.ProxyTypeHttp(proxy.username, proxy.password, false);
-                    } else if (Objects.equals(proxy.type, "socks5")) {
-                        proxyType = new TdApi.ProxyTypeSocks5(proxy.username, proxy.password);
-                    } else {
-                        return Future.failedFuture("Unsupported proxy type: %s".formatted(proxy.type));
+                    switch (proxy.type) {
+                        case "http" -> proxyType = new TdApi.ProxyTypeHttp(proxy.username, proxy.password, false);
+                        case "socks5" -> proxyType = new TdApi.ProxyTypeSocks5(proxy.username, proxy.password);
+                        case "mtproto" -> proxyType = new TdApi.ProxyTypeMtproto(proxy.secret);
+                        case null, default -> {
+                            return Future.failedFuture("Unsupported proxy type: %s".formatted(proxy.type));
+                        }
                     }
                     return edit ? client.execute(new TdApi.EditProxy(tdProxy.id, proxy.server, proxy.port, true, proxyType))
                             : client.execute(new TdApi.AddProxy(proxy.server, proxy.port, true, proxyType));
@@ -846,7 +869,7 @@ public class TelegramVerticle extends AbstractVerticle {
                     }
 
                     fileRecord = TdApiHelp.getFileHandler(message)
-                            .orElseThrow(() -> new NoStackTraceException("not support message type"))
+                            .orElseThrow(() -> VertxException.noStackTrace("not support message type"))
                             .convertFileRecord(telegramRecord.id())
                             .withThreadInfo(messageThreadInfo);
 
