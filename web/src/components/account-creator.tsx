@@ -31,7 +31,7 @@ import { useTelegramAccount } from "@/hooks/use-telegram-account";
 import TGDuck16Plane from "@/components/animations/tg-duck16_plane.json";
 import TGQRPlane from "@/components/animations/tg-qr-plane.json";
 import dynamic from "next/dynamic";
-import QRCodeStyling, { Options } from "qr-code-styling";
+import QRCodeStyling, { type Options } from "qr-code-styling";
 
 interface AccountCreatorProps {
   isAdd?: boolean;
@@ -59,7 +59,9 @@ export default function AccountCreator({
   const [phoneNumber, setPhoneNumber] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
-
+  const [isDeMethodExecuting] = useDebounce(isMethodExecuting, 500, {
+    leading: true,
+  });
   const {
     trigger: triggerCreate,
     isMutating: isCreateMutating,
@@ -67,7 +69,6 @@ export default function AccountCreator({
   } = useSWRMutation<{ id: string }, Error>(
     "/telegram/create",
     async (key: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
       return await request(key, {
         method: "POST",
         body: JSON.stringify({
@@ -111,6 +112,9 @@ export default function AccountCreator({
           }, 1000);
           break;
         default:
+          setTimeout(() => {
+            void mutate("/telegrams");
+          }, 500);
           console.log("Unknown telegram constructor:", state.constructor);
       }
     },
@@ -228,7 +232,7 @@ export default function AccountCreator({
         </p>
         <InputOTP
           id="code"
-          maxLength={5}
+          maxLength={6}
           value={code}
           disabled={isMethodExecuting}
           required
@@ -240,6 +244,7 @@ export default function AccountCreator({
             <InputOTPSlot index={2} />
             <InputOTPSlot index={3} />
             <InputOTPSlot index={4} />
+            <InputOTPSlot index={5} />
           </InputOTPGroup>
         </InputOTP>
       </div>
@@ -309,7 +314,7 @@ export default function AccountCreator({
               className={cn("w-full", isMethodExecuting ? "opacity-50" : "")}
               disabled={isMethodExecuting}
             >
-              {isMethodExecuting ? (
+              {isDeMethodExecuting ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : (
                 "🚀 Submit"
@@ -323,7 +328,7 @@ export default function AccountCreator({
               disabled={isMethodExecuting}
               onClick={handleRequestQrCodeAuthentication}
             >
-              {isMethodExecuting ? (
+              {isDeMethodExecuting ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : (
                 "LOG IN BY QR CODE"
